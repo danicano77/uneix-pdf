@@ -24,6 +24,14 @@ npm run preview   # previsualitza la versió compilada
 npm test          # proves unitàries
 ```
 
+## Desplegament
+
+El projecte està publicat a **https://danicano77.github.io/uneix-pdf/**.
+
+Cada push a `main` executa `.github/workflows/deploy.yml`, que compila l'app amb `npm ci &&
+npm run build` i publica el contingut de `dist/` a GitHub Pages. Pages està configurat amb
+`build_type: workflow`.
+
 ## Tecnologia
 
 React + TypeScript + Vite, amb `pdf-lib` per a la manipulació dels PDF.
