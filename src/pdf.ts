@@ -5,6 +5,15 @@ export interface PageSelection {
   pages: number[];
 }
 
+export interface SplitSource extends PageSelection {
+  name: string;
+}
+
+export interface OutputFile {
+  name: string;
+  bytes: Uint8Array;
+}
+
 const numberFormat = new Intl.NumberFormat('ca-ES', { maximumFractionDigits: 1 });
 
 /** Mida llegible en català, p. ex. «1,2 MB». */
@@ -89,15 +98,79 @@ export async function mergeDocuments(selections: PageSelection[], title: string)
   return output.save({ useObjectStreams: true });
 }
 
-/** Desa els bytes resultants com a fitxer descarregable. */
-export function downloadPdf(bytes: Uint8Array, filename: string): void {
-  const blob = new Blob([bytes as BlobPart], { type: 'application/pdf' });
+/** Neteja un nom perquè sigui vàlid com a nom de fitxer. */
+export function safeFilename(input: string): string {
+  const cleaned = input
+    .replace(/\.pdf$/i, '')
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '_')
+    .replace(/[._ ]+$/g, '')
+    .trim();
+  return cleaned || 'document';
+}
+
+/**
+ * Genera un PDF independent per a cada pàgina seleccionada.
+ * Amb un sol document s'empra el nom base; amb diversos, el nom de cada fitxer.
+ */
+export async function splitIntoPages(sources: SplitSource[], baseName: string): Promise<OutputFile[]> {
+  const { PDFDocument } = await import('pdf-lib');
+  const files: OutputFile[] = [];
+  const usedNames = new Set<string>();
+  const singleSource = sources.length === 1;
+  const allPages = sources.flatMap((source) => source.pages);
+  const width = Math.max(2, String(allPages.length ? Math.max(...allPages) : 1).length);
+
+  for (const source of sources) {
+    const prefix = safeFilename(singleSource ? baseName : source.name);
+
+    for (const page of source.pages) {
+      const document = await PDFDocument.create();
+      const [copied] = await document.copyPages(source.doc, [page - 1]);
+      document.addPage(copied);
+      document.setTitle(`${prefix} — pàgina ${page}`);
+      document.setProducer('Uneix PDF');
+
+      const bytes = await document.save({ useObjectStreams: true });
+      const pageLabel = String(page).padStart(width, '0');
+      let name = `${prefix}-pag-${pageLabel}.pdf`;
+      let duplicate = 2;
+      while (usedNames.has(name.toLowerCase())) {
+        name = `${prefix}-pag-${pageLabel}-${duplicate++}.pdf`;
+      }
+      usedNames.add(name.toLowerCase());
+      files.push({ name, bytes });
+    }
+  }
+
+  return files;
+}
+
+/** Afegeix tots els PDF generats a un fitxer ZIP. */
+export async function createZip(files: OutputFile[]): Promise<Uint8Array> {
+  const { zipSync } = await import('fflate');
+  const entries: Record<string, Uint8Array> = {};
+  for (const file of files) entries[file.name] = file.bytes;
+  return zipSync(entries, { level: 0 });
+}
+
+/** Desa qualsevol fitxer generat al dispositiu. */
+export function downloadBytes(bytes: Uint8Array, filename: string, mime: string): void {
+  const blob = new Blob([bytes as BlobPart], { type: mime });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = filename.toLowerCase().endsWith('.pdf') ? filename : `${filename}.pdf`;
+  link.download = filename;
   document.body.appendChild(link);
   link.click();
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+/** Desa un PDF resultant. */
+export function downloadPdf(bytes: Uint8Array, filename: string): void {
+  downloadBytes(
+    bytes,
+    filename.toLowerCase().endsWith('.pdf') ? filename : `${filename}.pdf`,
+    'application/pdf',
+  );
 }

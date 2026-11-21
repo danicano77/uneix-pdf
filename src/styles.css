@@ -116,6 +116,50 @@ input {
   line-height: 1.55;
 }
 
+.mode-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(20, 28, 38, 0.7);
+}
+
+.mode-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 9px 12px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.16s, color 0.16s, border-color 0.16s;
+}
+
+.mode-button svg {
+  width: 17px;
+  height: 17px;
+  flex-shrink: 0;
+}
+
+.mode-button:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.mode-button.active {
+  color: var(--accent);
+  border-color: rgba(34, 211, 238, 0.35);
+  background: var(--accent-soft);
+}
+
 .dropzone {
   display: flex;
   flex-direction: column;
@@ -537,6 +581,44 @@ input {
   font-size: 0.84rem;
 }
 
+.format-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.format-row label {
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.format-row select {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #0f1720;
+  color: var(--text);
+  font-size: 0.8rem;
+  outline: none;
+}
+
+.format-row select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.action-hint {
+  margin: 7px 0 0;
+  color: #64758a;
+  font-size: 0.71rem;
+  line-height: 1.4;
+}
+
 .action-side {
   display: flex;
   flex-direction: column;
@@ -610,6 +692,11 @@ input {
   .app {
     padding-inline: 14px;
     gap: 16px;
+  }
+
+  .mode-button {
+    padding: 9px 8px;
+    font-size: 0.78rem;
   }
 
   .privacy span {

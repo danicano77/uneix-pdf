@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent } from 'react';
 import {
+  createZip,
+  downloadBytes,
   downloadPdf,
   formatBytes,
   loadPdf,
   mergeDocuments,
   parsePageRange,
+  safeFilename,
+  splitIntoPages,
 } from './pdf';
 import type { PDFDocument } from 'pdf-lib';
 
@@ -23,6 +27,9 @@ interface Plan {
   pages: number[];
   error?: string;
 }
+
+type Mode = 'merge' | 'split';
+type SplitFormat = 'zip' | 'files';
 
 const createId = () =>
   typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -86,7 +93,19 @@ function MergeIcon() {
   );
 }
 
+function SplitIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M7 4h7l4 4v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z" />
+      <path d="M14 4v4h4M4 10h5M4 14h7M4 18h5" />
+      <path d="m13 10 3 2-3 2M20 10l-3 2 3 2" />
+    </svg>
+  );
+}
+
 export default function App() {
+  const [mode, setMode] = useState<Mode>('merge');
+  const [splitFormat, setSplitFormat] = useState<SplitFormat>('zip');
   const [items, setItems] = useState<PdfItem[]>([]);
   const [outputName, setOutputName] = useState('document-unit');
   const [error, setError] = useState('');
@@ -219,7 +238,7 @@ export default function App() {
     setDropTargetId(null);
   };
 
-  const handleMerge = async () => {
+  const handleRun = async () => {
     if (!items.length || busy) return;
     setError('');
     setNotice('');
@@ -229,19 +248,42 @@ export default function App() {
       return;
     }
 
-    const baseName = outputName.trim() || 'document-unit';
-    const filename = `${baseName.replace(/\.pdf$/i, '')}.pdf`;
+    const baseName = outputName.trim() || (mode === 'merge' ? 'document-unit' : 'pagines');
 
     setBusy(true);
     try {
       // Dona un cicle al navegador per mostrar l'estat de càrrega.
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
-      const bytes = await mergeDocuments(
-        plans.map(({ item, pages }) => ({ doc: item.doc, pages })),
+
+      if (mode === 'merge') {
+        const filename = `${safeFilename(baseName)}.pdf`;
+        const bytes = await mergeDocuments(
+          plans.map(({ item, pages }) => ({ doc: item.doc, pages })),
+          baseName,
+        );
+        downloadPdf(bytes, filename);
+        setNotice(`S’ha desat «${filename}» amb ${totalPages} ${totalPages === 1 ? 'pàgina' : 'pàgines'}.`);
+        return;
+      }
+
+      const files = await splitIntoPages(
+        plans.map(({ item, pages }) => ({ doc: item.doc, pages, name: item.name })),
         baseName,
       );
-      downloadPdf(bytes, filename);
-      setNotice(`S’ha desat «${filename}» amb ${totalPages} ${totalPages === 1 ? 'pàgina' : 'pàgines'}.`);
+
+      if (splitFormat === 'zip') {
+        const zipName = `${safeFilename(baseName)}.zip`;
+        const zip = await createZip(files);
+        downloadBytes(zip, zipName, 'application/zip');
+        setNotice(`S’han desat ${files.length} PDF dins de «${zipName}».`);
+      } else {
+        for (const file of files) {
+          downloadBytes(file.bytes, file.name, 'application/pdf');
+          // Petita pausa per evitar que el navegador bloquegi les descàrregues.
+          await new Promise<void>((resolve) => setTimeout(resolve, 150));
+        }
+        setNotice(`S’han desat ${files.length} fitxers PDF, un per pàgina.`);
+      }
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
@@ -263,9 +305,40 @@ export default function App() {
       </header>
 
       <section className="intro">
-        <h1>Ajunta els teus PDF en un de sol</h1>
-        <p>Afegeix tants fitxers com vulguis, canvia'n l'ordre si cal i descarrega el resultat.</p>
+        <h1>
+          {mode === 'merge'
+            ? 'Ajunta els teus PDF en un de sol'
+            : 'Separa les pàgines en PDF individuals'}
+        </h1>
+        <p>
+          {mode === 'merge'
+            ? "Afegeix tants fitxers com vulguis, canvia'n l'ordre si cal i descarrega el resultat."
+            : "Tria les pàgines que vols extreure i desa'n un fitxer PDF per a cadascuna."}
+        </p>
       </section>
+
+      <div className="mode-switch" role="tablist" aria-label="Què vols fer">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === 'merge'}
+          className={`mode-button${mode === 'merge' ? ' active' : ''}`}
+          onClick={() => { setMode('merge'); setError(''); setNotice(''); }}
+        >
+          <MergeIcon />
+          Uneix en un PDF
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === 'split'}
+          className={`mode-button${mode === 'split' ? ' active' : ''}`}
+          onClick={() => { setMode('split'); setError(''); setNotice(''); }}
+        >
+          <SplitIcon />
+          Separa per pàgines
+        </button>
+      </div>
 
       <label
         className={`dropzone${dropActive ? ' is-active' : ''}`}
@@ -357,7 +430,9 @@ export default function App() {
                       {item.pageCount} {item.pageCount === 1 ? 'pàgina' : 'pàgines'} · {formatBytes(item.size)}
                     </div>
                     <div className="range-row">
-                      <label htmlFor={`range-${item.id}`}>Pàgines</label>
+                      <label htmlFor={`range-${item.id}`}>
+                        {mode === 'merge' ? 'Pàgines' : 'Extreure'}
+                      </label>
                       <input
                         id={`range-${item.id}`}
                         className={plan.error ? 'invalid' : ''}
@@ -388,7 +463,11 @@ export default function App() {
               );
             })}
           </ol>
-          <p className="drag-tip">Consell: arrossega una targeta per canviar l'ordre dels fitxers.</p>
+          <p className="drag-tip">
+            {mode === 'merge'
+              ? 'Consell: arrossega una targeta per canviar l’ordre dels fitxers.'
+              : 'Consell: al camp «Extreure» pots fer servir rangs com 1-3, 5, 8-.'}
+          </p>
         </section>
       ) : (
         <div className="empty-state">
@@ -399,7 +478,9 @@ export default function App() {
 
       <footer className="actionbar">
         <div className="output-field">
-          <label htmlFor="output-name">Nom del PDF final</label>
+          <label htmlFor="output-name">
+            {mode === 'merge' ? 'Nom del PDF final' : 'Nom base dels fitxers'}
+          </label>
           <div className="name-input">
             <input
               id="output-name"
@@ -407,22 +488,60 @@ export default function App() {
               spellCheck={false}
               onChange={(event) => setOutputName(event.target.value)}
             />
-            <span>.pdf</span>
+            <span>{mode === 'merge' ? '.pdf' : '-pag-01.pdf'}</span>
           </div>
+
+          {mode === 'split' && (
+            <>
+              <div className="format-row">
+                <label htmlFor="split-format">Format</label>
+                <select
+                  id="split-format"
+                  value={splitFormat}
+                  onChange={(event) => setSplitFormat(event.target.value as SplitFormat)}
+                >
+                  <option value="zip">ZIP (recomanat)</option>
+                  <option value="files">PDF separats</option>
+                </select>
+              </div>
+              <p className="action-hint">
+                {splitFormat === 'zip'
+                  ? 'Cada pàgina serà un PDF independent dins del ZIP.'
+                  : 'El navegador pot demanar permís per a descàrregues múltiples.'}
+              </p>
+            </>
+          )}
         </div>
 
         <div className="action-side">
           <div className="summary">
-            <strong>{totalPages}</strong> {totalPages === 1 ? 'pàgina' : 'pàgines'} · {formatBytes(totalSize)}
+            {mode === 'merge' ? (
+              <>
+                <strong>{totalPages}</strong> {totalPages === 1 ? 'pàgina' : 'pàgines'} ·{' '}
+                {formatBytes(totalSize)}
+              </>
+            ) : (
+              <>
+                <strong>{totalPages}</strong> PDF · {formatBytes(totalSize)}
+              </>
+            )}
           </div>
           <button
             type="button"
             className="primary"
             disabled={!items.length || busy || hasRangeError}
-            onClick={() => void handleMerge()}
+            onClick={() => void handleRun()}
           >
-            {busy ? <span className="spinner" aria-hidden="true" /> : <MergeIcon />}
-            {busy ? 'Unint…' : 'Uneix i desa'}
+            {busy ? (
+              <span className="spinner" aria-hidden="true" />
+            ) : mode === 'merge' ? (
+              <MergeIcon />
+            ) : (
+              <SplitIcon />
+            )}
+            {mode === 'merge'
+              ? busy ? 'Unint…' : 'Uneix i desa'
+              : busy ? 'Separ…' : 'Separa i desa'}
           </button>
         </div>
       </footer>
